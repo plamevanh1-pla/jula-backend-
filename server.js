@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
 import ws from 'ws'; // Support des Websockets pour Node.js 20
+import paydunyaProdRoutes from './paydunya-prod.js'; // Importation paiement réel
 
 // Chargement des variables d'environnement
 dotenv.config();
@@ -26,7 +27,7 @@ if (!supabaseUrl || !supabaseKey || supabaseUrl.includes("METTEZ_ICI")) {
 // Initialisation sécurisée du client Supabase côté Serveur avec le transport Websocket
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false },
-  realtime: { transport: ws } // Injection du transport ws pour éviter le crash
+  realtime: { transport: ws }
 });
 
 // 1. Route d'accueil pour tester si le backend Jula répond dans le navigateur
@@ -65,10 +66,8 @@ app.post('/api/payments/initiate', async (req, res) => {
   console.log(`[Paiement Jula] Initialisation d'un règlement de ${amount} FCFA pour la commande #${orderId} via ${phoneNumber}`);
 
   try {
-    // Simulation d'une attente réseau avec la passerelle Mobile Money (Wave / Orange)
     await new Promise(resolve => setTimeout(resolve, 1500));
 
-    // Mise à jour automatique du statut en arrière-plan sur Supabase
     const { error } = await supabase
       .from('orders')
       .update({ payment_method: 'Mobile Money (Validé)' })
@@ -95,7 +94,6 @@ app.post('/api/notifications/send-push', async (req, res) => {
   }
 
   try {
-    // 1. Recherche du jeton unique de l'appareil (Expo Push Token) dans Supabase
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('expo_push_token')
@@ -107,7 +105,6 @@ app.post('/api/notifications/send-push', async (req, res) => {
       return res.status(404).json({ success: false, message: "Aucun jeton d'alerte trouvé." });
     }
 
-    // 2. Envoi de l'impulsion physique aux serveurs mondiaux d'Expo Notifications
     const response = await fetch('https://exp.host', {
       method: 'POST',
       headers: {
@@ -134,6 +131,37 @@ app.post('/api/notifications/send-push', async (req, res) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// 5. 🆕 LE WEBHOOK D'ÉCOUTE ET DE CONFIRMATION AUTOMATIQUE (Dernier élément clé)
+app.post('/api/webhook/paydunya', async (req, res) => {
+  const { data } = req.body;
+  
+  if (!data || !data.invoice) {
+    return res.status(400).send("Statut invalide");
+  }
+
+  const orderId = data.invoice.custom_data ? data.invoice.custom_data.order_id : null;
+  const status = data.invoice.status;
+
+  console.log(`[Webhook Jula] Réception notification PayDunya pour Commande #${orderId} - Statut: ${status}`);
+
+  try {
+    if (status === "completed") {
+      // Si l'argent est bien encaissé en Côte d'Ivoire ou au Sénégal, on passe la commande en validée
+      await supabase
+        .from('orders')
+        .update({ status: 'confirmé', payment_method: 'PayDunya (Payé)' })
+        .eq('id', orderId);
+    }
+    return res.status(200).send("Webhook traité avec succès !");
+  } catch (error) {
+    console.error("Erreur Webhook:", error.message);
+    return res.status(500).send("Erreur interne");
+  }
+});
+
+// Activation de la route de paiement réel PayDunya
+app.use('/api/payments/prod', paydunyaProdRoutes);
 
 // Lancement universel du serveur compatible avec Render Cloud
 app.listen(PORT, '0.0.0.0', () => {
