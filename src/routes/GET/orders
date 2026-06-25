@@ -1,0 +1,18 @@
+ router.get("/", authMiddleware, (req, res) => {
+  res.json([
+    {
+      id: 1,
+      name: "Pizza",
+      price: 12,
+      image: "https://picsum.photos/400",
+      description: "Délicieuse pizza"
+    },
+    {
+      id: 2,
+      name: "Burger",
+      price: 8,
+      image: "https://picsum.photos/401",
+      description: "Burger maison"
+    }
+  ]);
+});
