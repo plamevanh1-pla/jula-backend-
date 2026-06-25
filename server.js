@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
-import ws from 'ws'; // 🆕 Correction pour Node.js 20 : Support des Websockets
+import ws from 'ws'; // Support des Websockets pour Node.js 20
 
 // Chargement des variables d'environnement
 dotenv.config();
@@ -10,23 +10,23 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Configuration de CORS pour autoriser votre application Expo Go à communiquer
+// Configuration de CORS pour autoriser votre application mobile à communiquer
 app.use(cors());
 app.use(express.json());
 
- // Initialisation du client Supabase côté Serveur avec sécurité de secours
-const supabaseUrl = process.env.SUPABASE_URL || 'https://bgfmnjvhlonrfpfsxefe.supabase.co';
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || 'sb_publishable_W_q0i6GH_dKXr2QFc3xu_Q_EUZzpDMK';
+// 🔐 VOS CLÉS EN DUR (Remplacées automatiquement si définies sur Render)
+const supabaseUrl = "https://bgfmnjvhlonrfpfsxefe.supabase.co";
+const supabaseKey = "sb_publishable_W_q0i6GH_dKXr2QFc3xu_Q_EUZzpDMK";
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("⚠️ Erreur : Les clés SUPABASE_URL ou SUPABASE_ANON_KEY sont manquantes dans le fichier .env");
+if (!supabaseUrl || !supabaseKey || supabaseUrl.includes("METTEZ_ICI")) {
+  console.error("⚠️ Erreur : Veuillez coller vos vraies clés Supabase à l'intérieur du fichier server.js");
   process.exit(1);
 }
 
 // Initialisation sécurisée du client Supabase côté Serveur avec le transport Websocket
-const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false },
-  realtime: { transport: ws } // 🆕 Injection du transport ws pour éviter le crash
+  realtime: { transport: ws } // Injection du transport ws pour éviter le crash
 });
 
 // 1. Route d'accueil pour tester si le backend Jula répond dans le navigateur
@@ -86,10 +86,59 @@ app.post('/api/payments/initiate', async (req, res) => {
   }
 });
 
-// Tout en bas de server.js, remplacez app.listen par :
+// 4. API DE PROPULSION DES NOTIFICATIONS PUSH (Application Fermée)
+app.post('/api/notifications/send-push', async (req, res) => {
+  const { receiverId, message } = req.body;
+
+  if (!receiverId || !message) {
+    return res.status(400).json({ success: false, message: "Données de notification incomplètes." });
+  }
+
+  try {
+    // 1. Recherche du jeton unique de l'appareil (Expo Push Token) dans Supabase
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('expo_push_token')
+      .eq('id', receiverId)
+      .single();
+
+    if (error || !profile || !profile.expo_push_token) {
+      console.log(`[Push Jula] Aucun jeton d'alerte trouvé pour le profil #${receiverId}`);
+      return res.status(404).json({ success: false, message: "Aucun jeton d'alerte trouvé." });
+    }
+
+    // 2. Envoi de l'impulsion physique aux serveurs mondiaux d'Expo Notifications
+    const response = await fetch('https://exp.host', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Accept-encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: profile.expo_push_token,
+        sound: 'default',
+        title: '💬 Nouveau message sur Jula',
+        body: message,
+        priority: 'high',
+        data: { screen: 'chat' }
+      }),
+    });
+
+    const result = await response.json();
+    console.log("[Push Jula] Alerte envoyée avec succès :", result);
+    return res.status(200).json({ success: true, result });
+
+  } catch (err) {
+    console.error("[Push Jula] Erreur d'envoi push :", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Lancement universel du serveur compatible avec Render Cloud
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n=================================================`);
-  console.log(`🚀 Serveur Jula lancé sur le réseau local !`);
-  console.log(`📡 URL réseau : http://192.168.100.10:${PORT}`);
+  console.log(`🚀 Serveur Mondial Jula branché avec succès !`);
+  console.log(`📡 URL de Production : https://jula-backend-production.onrender.com`);
   console.log(`=================================================\n`);
 });
